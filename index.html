@@ -42,6 +42,8 @@
   button:hover { filter:brightness(.95); }
   button:focus-visible { outline:3px solid #8cc4f0; outline-offset:2px; }
   .status { min-height:22px; margin-top:10px; font-size:13px; color:var(--muted); }
+  .status:not(:empty) { color:#b42318; font-weight:700; background:#fef3f2; border:1px solid #fda29b; border-radius:8px; padding:8px 10px; }
+  .status.ok:not(:empty) { color:#067647; background:#ecfdf3; border-color:#75e0a7; }
   .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px; font-size:13px; }
   .stats div { background:var(--pale); padding:9px 10px; border-radius:7px; }
   .stats strong { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
@@ -104,6 +106,9 @@
           <select id="lid-slits"><option value="none">None</option><option value="corners">Corners</option><option value="sides">Sides</option><option value="both">Sides + corners</option></select>
         </label>
         <label id="tray-slit-label" class="check full"><input id="tray-slits" type="checkbox"> Add tray corner slits (not available for snap-fit ridge trays)</label>
+        <label id="slide-dual-label" class="check full" hidden><input id="slide-dual" type="checkbox"> Parking rails on the tray bottom too (slide the lid underneath while you work)</label>
+        <label id="slide-park-label" class="full" hidden>Preview lid position <select id="slide-park"><option value="top">Closed on top</option><option value="bottom">Parked underneath</option></select></label>
+        <p id="slide-note" class="section-note full" hidden></p>
         <label id="print-flip-label" class="check full"><input id="print-flip" type="checkbox" checked> Export lid in print orientation (flipped, flat face on the bed)</label>
         <label id="label-recess-label" class="check full"><input id="label-recess" type="checkbox"> Add label recess on lid top (0.6 mm deep)</label>
         <label id="label-width-label" hidden>Label width <input id="label-width" type="number" min="10" max="200" step="1" value="40"></label>
@@ -191,6 +196,7 @@
         <button id="plate-download" class="secondary">Download print plate (both)</button>
         <button id="test-download" class="secondary">Clearance test plate</button>
         <button id="share-link" class="secondary">Copy settings link</button>
+        <button id="pick-folder" class="secondary" hidden>Choose save folder…</button>
       </div>
       <div class="status" id="status" role="status" aria-live="polite"></div>
       <p class="hint">The tray is open at the top by design; the lid closes it when assembled. Start with the balanced 0.30 mm-per-side preset, then tune for your printer and material. Choose tray-only, lid-only, or separated views to inspect each part, then flip the view to inspect undersides. Stack alignment adds feet under the tray and a locating rim on the lid. Parts download separately in millimetres. Check clearances and mesh unions in your slicer, then test-fit before a full print.</p>
@@ -201,8 +207,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const inputIds = ["length", "width", "height", "wall", "bottom", "clearance", "style", "lidThickness", "feature","flat-overhang","flex-wall",
-    "corner-style","corner-size","rows","columns","divider-thickness","divider-fillet","divider-height","feet","stack-feet","stack-rim","lid-slits","tray-slits","print-flip",
-    "magnetic","magnet-pos","mag-tray-top","mag-lid-bottom","mag-tray-bottom","mag-lid-top","magnet-diameter","magnet-thickness","magnet-clearance","label-recess","label-width","label-height","row-ratios","column-ratios"];
+    "corner-style","corner-size","rows","columns","divider-thickness","divider-fillet","divider-height","feet","stack-feet","stack-rim","lid-slits","tray-slits","print-flip","slide-dual","slide-park","magnetic","magnet-pos","mag-tray-top","mag-lid-bottom","mag-tray-bottom","mag-lid-top","magnet-diameter","magnet-thickness","magnet-clearance","label-recess","label-width","label-height","row-ratios","column-ratios"];
   const persistIds=[...inputIds,"fit-preset"];
   const sectionIds=["section-axis","section-pos","section-flip"];
   const state = {};
@@ -215,6 +220,7 @@
     return clamp(Number.isFinite(n) ? n : fallback, min, max);
   };
   function read() {
+    $("status").classList.remove("ok");
     let warning="";
     state.L = safe("length",120,20,300); state.W = safe("width",80,20,300);
     state.H = safe("height",35,2,200); state.t = safe("wall",2,1,12);
@@ -230,8 +236,10 @@
     state.printFlip=$("print-flip").checked;
     state.magnetic=$("magnetic").checked;
     state.magnetPos=$("magnet-pos").value;
+    state.slideDual=$("style").value==="slide"&&$("slide-dual").checked;
+    state.slidePark=state.slideDual?$("slide-park").value:"top";
     state.magnetFaces={trayTop:$("mag-tray-top").checked,lidBottom:$("mag-lid-bottom").checked,trayBottom:$("mag-tray-bottom").checked,lidTop:$("mag-lid-top").checked};
-    if($("style").value==="slide") state.magnetFaces={trayTop:false,lidBottom:false,trayBottom:$("mag-tray-bottom").checked,lidTop:$("mag-lid-top").checked};
+    if($("style").value==="slide") state.magnetFaces={trayTop:false,lidBottom:false,trayBottom:$("mag-tray-bottom").checked&&!state.slideDual,lidTop:$("mag-lid-top").checked};
     state.magnetDiameter=safe("magnet-diameter",6,2,12);
     state.magnetThickness=safe("magnet-thickness",2,1,5);
     state.magnetClearance=safe("magnet-clearance",.2,0,.6);
@@ -284,6 +292,17 @@
         $("status").textContent = `The dovetail slide needs wall thickness of at least 2.4 mm, inside depth of at least ${minH.toFixed(1)} mm for this wall (the groove uses the top of the walls), and a length of at least 20 mm beyond the corner radius.`;
         return false;
       }
+      if(state.slideDual) {
+        const zLow=1.5+dd*2/3,minB=Math.ceil((zLow+.8)*10)/10;
+        if(state.b<minB) {
+          $("status").textContent=`Bottom rails need a bottom thickness of at least ${minB.toFixed(1)} mm: the parked lid's tongue occupies the lower ${zLow.toFixed(1)} mm under the floor, leaving 0.8 mm of solid floor. The lid and rail shape are unchanged.`;
+          return false;
+        }
+        if(state.feet||state.stackFeet) {
+          $("status").textContent="Bottom rails can't be combined with corner feet or stacking feet (the parked lid sits under the tray); turn them off.";
+          return false;
+        }
+      }
     }
     if(state.magnetic) {
       const pocketSpan=state.magnetDiameter+state.magnetClearance;
@@ -321,6 +340,20 @@
     const magOn=$("magnetic").checked,isSlide=$("style").value==="slide";
     ["magnet-pos-label","mag-tray-top-label","mag-lid-bottom-label","mag-tray-bottom-label","mag-lid-top-label","magnet-diameter-label","magnet-thickness-label","magnet-clearance-label","magnet-note"].forEach(id=>{$(id).hidden=!magOn;});
     if(isSlide) ["mag-tray-top-label","mag-lid-bottom-label"].forEach(id=>{$(id).hidden=true;});
+    $("slide-dual-label").hidden=!isSlide;
+    $("slide-park-label").hidden=!(isSlide&&$("slide-dual").checked);
+    $("mag-tray-bottom").disabled=isSlide&&$("slide-dual").checked;
+    $("slide-note").hidden=!isSlide;
+    if(isSlide) {
+      const t=safe("wall",2,1,12),dd=Math.min(3,t-1.2),lt=safe("lidThickness",2,1,8);
+      const minH=Math.ceil((3+dd*2/3)*10)/10,zLow=1.5+dd*2/3,minB=Math.ceil((zLow+.8)*10)/10;
+      const dual=$("slide-dual").checked;
+      const tray=minH+(dual?minB:1),lid=lt+.3;
+      $("slide-note").textContent=`Limits with a ${t.toFixed(1)} mm wall (groove depth ${dd.toFixed(1)} mm): wall at least 2.4 mm; inside depth at least ${minH.toFixed(1)} mm. `
+        +(dual?`With bottom rails: bottom thickness at least ${minB.toFixed(1)} mm, because the parked tongue takes ${zLow.toFixed(1)} mm under the floor and 0.8 mm of floor must remain; no feet or tray-bottom magnets. Smallest tray height (depth + bottom) is about ${tray.toFixed(1)} mm, or about ${(tray+lid).toFixed(1)} mm with the lid closed on top. `
+          :`Smallest tray height (depth + bottom, 1 mm floor) is about ${tray.toFixed(1)} mm, or about ${(tray+lid).toFixed(1)} mm with the lid closed on top. `)
+        +"A thinner wall means a shallower groove and lower limits (a 2.4 mm wall gives a 1.2 mm groove). Lid thickness adds to the closed height.";
+    }
     if (!read()) return;
     const {L,W,H,t,c} = state;
     $("outer").textContent = `${(L+2*t).toFixed(1)} × ${(W+2*t).toFixed(1)} × ${(H+state.b).toFixed(1)} mm`;
@@ -349,7 +382,7 @@
     $("feature-label").hidden=state.style==="slide"||state.style==="flat";
     $("flat-overhang-label").hidden=state.style!=="flat";
     $("magnet-animation").hidden=!state.magnetic;
-    $("print-notes").textContent=(state.style==="slide"?(state.printFlip?"Lid exports plate-down so the dovetail tongue prints upward with 45° overhangs (no supports). ":"Lid exports in its assembled orientation; flip it plate-down in your slicer. ")+"Tray prints upright; the lowered end and groove roof are 45° so no supports are needed. Test-fit the tongue and adjust clearance. ":
+    $("print-notes").textContent=(state.slideDual?"Bottom rails: the floor sits over the lower slot, so print the tray with supports (or support only under the floor) and remove them through the slot entrance. ":"")+(state.style==="slide"?(state.printFlip?"Lid exports plate-down so the dovetail tongue prints upward with 45° overhangs (no supports). ":"Lid exports in its assembled orientation; flip it plate-down in your slicer. ")+"Tray prints upright; the lowered end and groove roof are 45° so no supports are needed. Test-fit the tongue and adjust clearance. ":
       state.printFlip?"Lid exports flipped so its flat top sits on the bed and skirts/plugs print upward without supports. Tray prints upright; its underside magnet pockets open onto the bed. ":
       "Lid exports in its assembled orientation; flip it in your slicer so the skirt points up. ")
       +(state.magnetic?"Magnet pockets are open-face (no pause-at-layer needed): press magnets in after printing, with matching polarity checked first. ":"")
@@ -400,10 +433,11 @@
     canvas.width=Math.round(rect.width*dpr); canvas.height=Math.round(rect.height*dpr);
     const ctx=canvas.getContext("2d",{willReadFrequently:true}), width=rect.width,height=rect.height;
     const mode=$("view-mode").value;
-    const tray=mode==="lid"?[]:trayMesh(state), lid=mode==="tray"?[]:lidMesh(state);
+    const parked=state.slidePark==="bottom";
+    const tray=mode==="lid"?[]:trayMesh(state), lid=mode==="tray"?[]:(parked?mirrorZ(lidMesh(state),slideGeometry(state).top):lidMesh(state));
     let raw=[...tray.map(tri=>({tri,color:[57,132,180],lid:false})),
       ...lid.map(tri=>({tri,color:[235,161,67],lid:true})),
-      ...magnetFaces(mode)];
+      ...magnetFaces(mode).filter(face=>!(parked&&face.lid))];
     const axisName=$("section-axis").value,sectionOn=axisName!=="off";
     if(sectionOn&&raw.length) {
       const axis={x:0,y:1,z:2}[axisName];
@@ -417,7 +451,7 @@
     const displacement=face=>{
       const insertion=face.insert?face.insert*(1-magnet.progress)*14:0;
       if(!face.lid) return [0,0,insertion];
-      const separated=mode==="exploded"?Math.max(14,state.H*.45):0;
+      const separated=(mode==="exploded"?Math.max(14,state.H*.45):0)*(state.slidePark==="bottom"?-1:1);
       if(state.style==="slide") return [-(state.L+2*state.t+12)*(1-animation.progress),0,separated+insertion];
       return [0,0,separated+insertion+Math.max(14,state.H*.45)*(1-animation.progress)];
     };
@@ -868,9 +902,17 @@
       const a=inner[i],b=inner[(i+1)%inner.length];return [a[1]-b[1],b[0]-a[0],0];
     });
   }
+  function mirrorZ(tris,top) {
+    return tris.map(([a,b,c])=>[[a[0],a[1],top-a[2]],[c[0],c[1],top-c[2]],[b[0],b[1],top-b[2]]]);
+  }
+  function addSlideLower(out,s) {
+    const tmp=[];addSlideUpper(tmp,s);
+    out.push(...mirrorZ(tmp,slideGeometry(s).top));
+  }
   function trayMesh(s) {
     const {L,W,H,t,b,c,lt,f,cornerStyle,cornerSize,rows,columns,dividerThickness,dividerFillet,dividerHeight,feet,style}=s;
     const x1=L+2*t,y1=W+2*t,top=style==="slide"?slideGeometry(s).gs:H+b,m=[];
+    const z0=s.slideDual?slideGeometry(s).top-slideGeometry(s).gs:0;
     const cornerR=cornerStyle==="square"?0:cornerSize,innerR=cornerR>0?cr(cornerR,-t,cornerStyle):0;
     let outer=profile(0,0,x1,y1,cornerR,cornerStyle);const pockets=style==="slide"?[]:pocketsFor(s,"trayTop"),botPockets=pocketsFor(s,"trayBottom"),magnetDepth=s.magnetThickness+.15;
     let inner=profile(t,t,L+t,W+t,innerR,cornerStyle),trayRelief=new Set();
@@ -881,7 +923,7 @@
     }
     const usableDividerHeight=style==="slide"?Math.min(dividerHeight,Math.max(0,slideGeometry(s).gs-b-.3)):dividerHeight;
     if(botPockets.length) surfaceWithPockets(m,outer,0,[0,0,-1],botPockets,magnetDepth);
-    else fan(m,outer,0,[0,0,-1]);
+    else fan(m,outer,z0,[0,0,-1]);
     fan(m,inner,b,[0,0,1]);
     const ridgeWidth=.35,ridgeLow=top-1.6,ridgeHigh=top-1.15;
     const ridge=style==="snap"?profile(-ridgeWidth,-ridgeWidth,x1+ridgeWidth,y1+ridgeWidth,
@@ -897,7 +939,7 @@
       } else if(s.traySlits) {
         quad(m,[oa[0],oa[1],0],[ob[0],ob[1],0],[ob[0],ob[1],slitFloor],[oa[0],oa[1],slitFloor],outerNormal);
         if(!trayRelief.has(i)) quad(m,[oa[0],oa[1],slitFloor],[ob[0],ob[1],slitFloor],[ob[0],ob[1],top],[oa[0],oa[1],top],outerNormal);
-      } else quad(m,[oa[0],oa[1],0],[ob[0],ob[1],0],[ob[0],ob[1],top],[oa[0],oa[1],top],outerNormal);
+      } else quad(m,[oa[0],oa[1],z0],[ob[0],ob[1],z0],[ob[0],ob[1],top],[oa[0],oa[1],top],outerNormal);
       const innerNormal=[ia[1]-ib[1],ib[0]-ia[0],0];
       if(s.traySlits) {
         quad(m,[ia[0],ia[1],b],[ia[0],ia[1],slitFloor],[ib[0],ib[1],slitFloor],[ib[0],ib[1],b],innerNormal);
@@ -909,7 +951,7 @@
     if(pockets.length&&style!=="slide") ring(m,outer,inner,top,[0,0,1],trayRelief,pockets,magnetDepth);
     if(trayRelief.size) addCornerReliefSlots(m,outer,inner,slitFloor,top,trayRelief,slitFloor,[0,0,1]);
     if(style==="snap") ring(m,ridge,outer,ridgeHigh,[0,0,1]);
-    if(style==="slide") addSlideUpper(m,s);
+    if(style==="slide") {addSlideUpper(m,s);if(s.slideDual) addSlideLower(m,s);}
     const columnBands=[];
     if(columns>1) for(let i=1;i<columns;i++) {
       const center=t+L*s.colFracs[i-1],half=Math.min(dividerThickness/2,L/(columns*3));
@@ -1117,29 +1159,61 @@
   }
   const shift=(tris,dx,dy)=>tris.map(tri=>tri.map(([x,y,z])=>[x+dx,y+dy,z]));
   const extent=(tris,axis)=>tris.reduce((m,tri)=>Math.max(m,...tri.map(p=>p[axis])),0);
-  function save(tris,name,label) {
-    const url=URL.createObjectURL(stl(tris,name)), a=document.createElement("a");
-    a.href=url; a.download=`${name}.stl`; a.click();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
-    $("status").textContent=`${label} STL downloaded (${tris.length} triangles).`;
+  let saveDir=null;
+  async function save(tris,name,label) {
+    const blob=stl(tris,name),status=$("status");
+    status.classList.add("ok");
+    if(saveDir) {
+      try {
+        const fh=await saveDir.getFileHandle(`${name}.stl`,{create:true}),w=await fh.createWritable();
+        await w.write(blob);await w.close();
+        status.textContent=`${label} STL saved to folder "${saveDir.name}" as ${name}.stl (${tris.length} triangles).`;
+        return;
+      } catch(e) {
+        saveDir=null;
+        $("pick-folder").textContent="Choose save folder…";
+        status.textContent="Couldn't write to the chosen folder, using a normal download instead.";
+      }
+    }
+    const url=URL.createObjectURL(blob), a=document.createElement("a");
+    a.href=url; a.download=`${name}.stl`; a.style.display="none"; document.body.appendChild(a); a.click();
+    setTimeout(()=>{a.remove();URL.revokeObjectURL(url);},10000);
+    status.textContent=`${label} STL downloaded as ${name}.stl (${tris.length} triangles). Check your browser's Downloads folder; if nothing appears, allow downloads for this page.`;
+  }
+  if(window.showDirectoryPicker) {
+    const pick=$("pick-folder");
+    pick.hidden=false;
+    pick.addEventListener("click",async()=>{
+      try {
+        saveDir=await window.showDirectoryPicker({mode:"readwrite"});
+        pick.textContent=`Saving to: ${saveDir.name} (change)`;
+        $("status").classList.add("ok");
+        $("status").textContent=`STL files will now be saved straight into "${saveDir.name}".`;
+      } catch(e) {}
+    });
+  }
+  function readForDownload() {
+    if(read()) return true;
+    $("status").scrollIntoView({behavior:"smooth",block:"center"});
+    return false;
   }
   function download(which) {
-    if(!read()) return;
+    if(!readForDownload()) return;
     const isLid=which==="lid";
     const tris=isLid?printOrient(lidMesh(state),state.printFlip):trayMesh(state);
     save(tris,`tray-${which}-${state.style}`,isLid?"Lid":"Tray");
   }
   function downloadPlate() {
-    if(!read()) return;
+    if(!readForDownload()) return;
     const tray=printOrient(trayMesh(state),false),lid=printOrient(lidMesh(state),state.printFlip);
     save([...tray,...shift(lid,extent(tray,0)+10,0)],`tray-plate-${state.style}`,"Print plate");
   }
   function downloadTestPlate() {
-    if(!read()) return;
+    if(!readForDownload()) return;
     const clearances=[.1,.2,.3,.4,.5],all=[];
     let y=0;
     clearances.forEach((c,index)=>{
-      const test={...state,L:40,W:25,H:14,c,rows:1,columns:1,rowFracs:[],colFracs:[],magnetic:false,stackFeet:false,stackRim:false,feet:false,labelOn:false,
+      const test={...state,L:40,W:25,H:14,c,rows:1,columns:1,rowFracs:[],colFracs:[],magnetic:false,slideDual:false,slidePark:"top",stackFeet:false,stackRim:false,feet:false,labelOn:false,
         cornerSize:Math.min(state.cornerSize,8),dividerHeight:0,lt:state.lt};
       if(test.style==="snap"&&test.f<test.lt+2) test.f=test.lt+2;
       const tray=printOrient(trayMesh(test),false),lid=printOrient(lidMesh(test),state.printFlip);
