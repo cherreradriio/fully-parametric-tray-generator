@@ -106,8 +106,9 @@
           <select id="lid-slits"><option value="none">None</option><option value="corners">Corners</option><option value="sides">Sides</option><option value="both">Sides + corners</option></select>
         </label>
         <label id="tray-slit-label" class="check full"><input id="tray-slits" type="checkbox"> Add tray corner slits (not available for snap-fit ridge trays)</label>
+        <label id="slide-inset-label" class="check full" hidden><input id="slide-inset" type="checkbox"> Inset lid: lid sits below the wall tops inside a 45° groove, walls form a guide lip, flat back, prints with no supports (no magnets, no bottom rails)</label>
         <label id="slide-dual-label" class="check full" hidden><input id="slide-dual" type="checkbox"> Parking rails on the tray bottom too (slide the lid underneath while you work)</label>
-        <label id="slide-park-label" class="full" hidden>Preview lid position <select id="slide-park"><option value="top">Closed on top</option><option value="bottom">Parked underneath</option></select></label>
+        <label id="slide-park-label" class="full" hidden>Preview lid position <select id="slide-park"><option value="top">Closed on top</option><option value="bottom">Parked underneath</option><option value="both">Both: one on top, one parked</option></select></label>
         <p id="slide-note" class="section-note full" hidden></p>
         <label id="print-flip-label" class="check full"><input id="print-flip" type="checkbox" checked> Export lid in print orientation (flipped, flat face on the bed)</label>
         <label id="label-recess-label" class="check full"><input id="label-recess" type="checkbox"> Add label recess on lid top (0.6 mm deep)</label>
@@ -121,6 +122,7 @@
         <label id="mag-tray-top-label" class="check full" hidden><input id="mag-tray-top" type="checkbox" checked> Tray top (meets lid bottom)</label>
         <label id="mag-lid-bottom-label" class="check full" hidden><input id="mag-lid-bottom" type="checkbox" checked> Lid bottom (meets tray top)</label>
         <label id="mag-tray-bottom-label" class="check full" hidden><input id="mag-tray-bottom" type="checkbox" checked> Tray bottom (stacking, meets lid top)</label>
+        <label id="mag-hidden-label" class="check full" hidden><input id="mag-hidden" type="checkbox"> Hide tray-bottom magnets inside the floor (print is paused to drop them in; the underside prints flat and closed)</label>
         <label id="mag-lid-top-label" class="check full" hidden><input id="mag-lid-top" type="checkbox" checked> Lid top (stacking, meets tray bottom)</label>
         <label id="magnet-diameter-label" hidden>Disc magnet diameter <input id="magnet-diameter" type="number" min="2" max="12" step="0.1" value="6"></label>
         <label id="magnet-thickness-label" hidden>Disc magnet thickness <input id="magnet-thickness" type="number" min="1" max="5" step="0.1" value="2"></label>
@@ -128,7 +130,8 @@
         <p id="magnet-note" class="section-note full" hidden>Square-sided, open-face pockets let you pry magnets out for replacement. Use removable adhesive if needed and mark each magnet's polarity before gluing: mating faces (tray top/lid bottom, tray bottom/lid top) need opposite poles, and every pocket on a face should face the same way. Corner magnets grip best against lid lift but need thicker walls. The 6 × 2 mm default needs thicker walls, floor, and lid than the basic tray. <strong id="magnet-fit"></strong></p>
         <label class="check full"><input id="feet" type="checkbox"> Add low-profile corner feet</label>
         <label class="check full"><input id="stack-feet" type="checkbox"> Stacking feet under the tray (bottom)</label>
-        <label class="check full"><input id="stack-rim" type="checkbox"> Guide rim (top)</label>
+        <label class="check full"><input id="stack-rim" type="checkbox"> <span id="stack-rim-text">Guide rim (top)</span></label>
+        <label id="inset-rim-len-label" class="full" hidden>Guide rim length (front end of the lid the parked tray sits in) <input id="inset-rim-len" type="number" min="0" max="40" step="1" value="14"></label>
         <p class="section-note full">Use either or both: matching low feet under the tray and a raised rim on the lid help keep stacked trays aligned. Stacking feet replace the separate corner feet.</p>
       </div></details>
       <div class="hint" id="hint">Plug lid: a shallow insert fits inside the tray opening. Increase clearance if your printer tends to run tight.</div>
@@ -207,7 +210,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const inputIds = ["length", "width", "height", "wall", "bottom", "clearance", "style", "lidThickness", "feature","flat-overhang","flex-wall",
-    "corner-style","corner-size","rows","columns","divider-thickness","divider-fillet","divider-height","feet","stack-feet","stack-rim","lid-slits","tray-slits","print-flip","slide-dual","slide-park","magnetic","magnet-pos","mag-tray-top","mag-lid-bottom","mag-tray-bottom","mag-lid-top","magnet-diameter","magnet-thickness","magnet-clearance","label-recess","label-width","label-height","row-ratios","column-ratios"];
+    "corner-style","corner-size","rows","columns","divider-thickness","divider-fillet","divider-height","feet","stack-feet","stack-rim","lid-slits","tray-slits","print-flip","slide-dual","slide-inset","inset-rim-len","slide-park","magnetic","magnet-pos","mag-tray-top","mag-lid-bottom","mag-tray-bottom","mag-hidden","mag-lid-top","magnet-diameter","magnet-thickness","magnet-clearance","label-recess","label-width","label-height","row-ratios","column-ratios"];
   const persistIds=[...inputIds,"fit-preset"];
   const sectionIds=["section-axis","section-pos","section-flip"];
   const state = {};
@@ -233,12 +236,14 @@
     state.slitSides=slitMode==="sides"||slitMode==="both";
     state.compliant=slitMode!=="none"&&state.style!=="slide"&&state.style!=="flat";
     state.traySlits=$("tray-slits").checked&&state.style!=="slide"&&state.style!=="snap";
-    state.printFlip=$("print-flip").checked;
-    state.magnetic=$("magnetic").checked;
+    state.slideInset=state.style==="slide"&&$("slide-inset").checked;
+    state.printFlip=$("print-flip").checked&&!state.slideInset;
+    state.magnetic=$("magnetic").checked&&!state.slideInset;
     state.magnetPos=$("magnet-pos").value;
-    state.slideDual=$("style").value==="slide"&&$("slide-dual").checked;
-    state.slidePark=state.slideDual?$("slide-park").value:"top";
+    state.slideDual=false;
+    state.slidePark=(state.slideDual||(state.slideInset&&$("stack-rim").checked))?$("slide-park").value:"top";
     state.magnetFaces={trayTop:$("mag-tray-top").checked,lidBottom:$("mag-lid-bottom").checked,trayBottom:$("mag-tray-bottom").checked,lidTop:$("mag-lid-top").checked};
+    state.magHidden=$("mag-hidden").checked&&state.magnetFaces.trayBottom;
     if($("style").value==="slide") state.magnetFaces={trayTop:false,lidBottom:false,trayBottom:$("mag-tray-bottom").checked&&!state.slideDual,lidTop:$("mag-lid-top").checked};
     state.magnetDiameter=safe("magnet-diameter",6,2,12);
     state.magnetThickness=safe("magnet-thickness",2,1,5);
@@ -250,7 +255,8 @@
     state.dividerFillet=safe("divider-fillet",1,0,5);
     state.dividerHeight=safe("divider-height",25,2,state.H);
     state.feet=$("feet").checked;
-    state.stackFeet=$("stack-feet").checked;state.stackRim=$("stack-rim").checked;
+    state.stackFeet=$("stack-feet").checked;state.stackRim=$("stack-rim").checked&&(state.style!=="slide"||state.slideInset);
+    state.rimLen=0;
     const ratios=id=>{
       const parts=$(id).value.split(/[\s,:;]+/).filter(Boolean).map(Number);
       return parts.length>=2&&parts.length<=8&&parts.every(n=>Number.isFinite(n)&&n>0)?parts:null;
@@ -286,7 +292,15 @@
       $("status").textContent = `The lift-off overcap needs an inside depth of at least ${(state.lt+1).toFixed(1)} mm (lid thickness + 1) so its skirt has room.`;
       return false;
     }
-    if(state.style==="slide") {
+    if(state.style==="slide"&&state.slideInset) {
+      const g=slideGeometry(state);
+      if(state.t<2.2||g.sl<.2||g.h0<.4||g.gs-state.b<2||g.top-g.zl<2.8||state.L<2*Math.max(g.R,state.t)+20+state.rimLen) {
+        const need=2+(g.top-g.gs);
+        $("status").textContent=`Inset lid limits: wall at least 2.2 mm, lid thickness at least ${(state.c+.9).toFixed(1)} mm for this clearance, and inside depth ≥ ${need.toFixed(1)} mm (the groove, lid and 1.2 mm roof take ${(g.top-g.gs).toFixed(1)} mm of the top, leaving at least 2 mm of cavity under the lid).`;
+        return false;
+      }
+    }
+    if(state.style==="slide"&&!state.slideInset) {
       const R=state.cornerStyle==="square"?0:state.cornerSize,dd=Math.min(3,state.t-1.2),minH=Math.ceil((3+dd*2/3)*10)/10;
       if(state.t<2.4||state.H<minH||state.L<2*Math.max(R,state.t)+20) {
         $("status").textContent = `The dovetail slide needs wall thickness of at least 2.4 mm, inside depth of at least ${minH.toFixed(1)} mm for this wall (the groove uses the top of the walls), and a length of at least 20 mm beyond the corner radius.`;
@@ -322,6 +336,14 @@
         if(topOn&&state.traySlits) {$("status").textContent="Corner magnets on the tray top conflict with corner tray slits; turn off tray slits or use side magnets.";return false;}
         if(botOn&&(state.stackFeet||state.feet)) {$("status").textContent="Corner magnets on the tray bottom conflict with corner feet and stacking feet; turn them off or use side magnets.";return false;}
       }
+      if(mf.lidBottom&&mf.lidTop&&state.lt<2*pocketDepth+.8) {
+        $("status").textContent=`Magnets on both lid faces need a lid thickness of at least ${(2*pocketDepth+.8).toFixed(1)} mm so the two sets of pockets don't break through each other; turn one face off or thicken the lid.`;
+        return false;
+      }
+      if(mf.trayTop&&mf.trayBottom&&state.style!=="slide"&&state.H+state.b<2*pocketDepth+1.5) {
+        $("status").textContent=`Magnets on both tray faces need a total height (depth + bottom) of at least ${(2*pocketDepth+1.5).toFixed(1)} mm; turn one face off or make the tray taller.`;
+        return false;
+      }
       if(state.b<pocketDepth+.4||state.lt<pocketDepth+.4) {
         $("status").textContent=`Magnet pockets need bottom and lid thicknesses of at least ${(pocketDepth+.4).toFixed(2)} mm to keep a printable floor.`;
         return false;
@@ -337,14 +359,27 @@
   const lidNames = {plug:"Plug / friction fit", snap:"Flex-fit overcap", overcap:"Lift-off overcap", flat:"Flat overlay", slide:"Sliding panel"};
   function update() {
     // Reveal magnet controls before validation, otherwise a too-thin wall would hide the very controls needed to fix it.
-    const magOn=$("magnetic").checked,isSlide=$("style").value==="slide";
+    const isSlide=$("style").value==="slide",inset=isSlide&&$("slide-inset").checked,magOn=$("magnetic").checked&&!inset;
+    $("magnetic").disabled=inset;
+    $("slide-inset-label").hidden=!isSlide;
+    $("inset-rim-len-label").hidden=true;
+    $("slide-dual").checked=false;
+    $("slide-inset").disabled=false;
+    $("slide-dual").disabled=inset;
     ["magnet-pos-label","mag-tray-top-label","mag-lid-bottom-label","mag-tray-bottom-label","mag-lid-top-label","magnet-diameter-label","magnet-thickness-label","magnet-clearance-label","magnet-note"].forEach(id=>{$(id).hidden=!magOn;});
     if(isSlide) ["mag-tray-top-label","mag-lid-bottom-label"].forEach(id=>{$(id).hidden=true;});
-    $("slide-dual-label").hidden=!isSlide;
-    $("slide-park-label").hidden=!(isSlide&&$("slide-dual").checked);
+    $("mag-hidden-label").hidden=!magOn||!$("mag-tray-bottom").checked||$("mag-tray-bottom").disabled;
+    $("slide-dual-label").hidden=true;
+    $("slide-park-label").hidden=!(isSlide&&(($("slide-dual").checked&&!inset)||(inset&&$("stack-rim").checked)));
     $("mag-tray-bottom").disabled=isSlide&&$("slide-dual").checked;
     $("slide-note").hidden=!isSlide;
-    if(isSlide) {
+    $("stack-rim").disabled=isSlide&&!inset;
+    $("stack-rim-text").textContent=inset?"Guide rim: a wall around the lid's front and both sides (open at the back), standing flat on the bed beside the tray, so nothing overhangs. Slide the lid out, set the tray on it and the tray bottom sits inside the rim. The tray itself gets no rim. 'Preview lid position' can show it on top, parked, or both. Adds 2 mm per side":isSlide?"Guide rim (top) — only available with the inset lid: the dovetail lid prints top-face-down, so a raised rim would leave the whole plate floating in mid-air":"Guide rim (top)";
+    if(inset) {
+      const t=safe("wall",2,1,12),lt=safe("lidThickness",2,1,8),cc=safe("clearance",.3,.1,1.5);
+      const d=Math.min(3,t-1.2,lt+cc-.1),h0=lt-(d-cc-.3);
+      $("slide-note").textContent=`Inset lid limits: wall at least 2.2 mm (this wall gives a ${d.toFixed(1)} mm groove), lid thickness at least ${(cc+.9).toFixed(1)} mm, and inside depth at least ${(2+1.2+cc+h0+cc+.1+d).toFixed(1)} mm (2 mm of cavity under the groove, 1.2 mm roof, lid and clearances). The lid top ends up about ${(1.2+cc+h0+cc+.1+d-cc-lt).toFixed(1)} mm below the wall top, so the walls form a guide lip around it. Closed height is just depth + bottom thickness; the lid adds nothing on top. Magnets and bottom rails are unavailable in this mode.`;
+    } else if(isSlide) {
       const t=safe("wall",2,1,12),dd=Math.min(3,t-1.2),lt=safe("lidThickness",2,1,8);
       const minH=Math.ceil((3+dd*2/3)*10)/10,zLow=1.5+dd*2/3,minB=Math.ceil((zLow+.8)*10)/10;
       const dual=$("slide-dual").checked;
@@ -382,10 +417,10 @@
     $("feature-label").hidden=state.style==="slide"||state.style==="flat";
     $("flat-overhang-label").hidden=state.style!=="flat";
     $("magnet-animation").hidden=!state.magnetic;
-    $("print-notes").textContent=(state.slideDual?"Bottom rails: the floor sits over the lower slot, so print the tray with supports (or support only under the floor) and remove them through the slot entrance. ":"")+(state.style==="slide"?(state.printFlip?"Lid exports plate-down so the dovetail tongue prints upward with 45° overhangs (no supports). ":"Lid exports in its assembled orientation; flip it plate-down in your slicer. ")+"Tray prints upright; the lowered end and groove roof are 45° so no supports are needed. Test-fit the tongue and adjust clearance. ":
-      state.printFlip?"Lid exports flipped so its flat top sits on the bed and skirts/plugs print upward without supports. Tray prints upright; its underside magnet pockets open onto the bed. ":
+    $("print-notes").textContent=(state.slideDual?"Bottom rails: the floor sits over the lower slot, so print the tray with supports (or support only under the floor) and remove them through the slot entrance. ":"")+(state.slideInset?"Inset lid exports as assembled, flat underside on the bed, and needs no supports (the groove edge is a 45° slope; the end cap is a plain wall). Tray prints upright with 45° groove roofs. Slide the lid in through the lowered end; the end cap closes it flush with the walls. Test-fit and adjust clearance. ":state.style==="slide"?(state.printFlip?"Lid exports plate-down so the dovetail tongue prints upward with 45° overhangs (no supports). ":"Lid exports in its assembled orientation; flip it plate-down in your slicer. ")+"Tray prints upright; the lowered end and groove roof are 45° so no supports are needed. Test-fit the tongue and adjust clearance. ":
+      state.printFlip?"Lid exports flipped so its flat top sits on the bed and skirts/plugs print upward without supports. Tray prints upright"+(state.magHidden?". ":"; its underside magnet pockets open onto the bed. "):
       "Lid exports in its assembled orientation; flip it in your slicer so the skirt points up. ")
-      +(state.magnetic?"Magnet pockets are open-face (no pause-at-layer needed): press magnets in after printing, with matching polarity checked first. ":"")
+      +(state.magnetic?(state.magHidden?`Tray-bottom magnets are hidden in the floor: the underside prints flat. PAUSE the print at Z = ${(HIDDEN_SKIN+state.magnetThickness+.15).toFixed(2)} mm (just below the pocket roof), press the magnets in with the correct polarity, then resume. They are permanent once covered. Other magnet pockets are open-face. `:"Magnet pockets are open-face (no pause-at-layer needed): press magnets in after printing, with matching polarity checked first. "):"")
       +(state.compliant||state.traySlits?"Slits are 1.2 mm wide; use 0.2 mm layers or finer and at least 3 perimeters around them. ":"")
       +"Use PETG or PLA+ for flexing parts; print thin skirts with the wall direction matching their length.";
     ["magnet-pos-label","mag-tray-top-label","mag-lid-bottom-label","mag-tray-bottom-label","mag-lid-top-label","magnet-diameter-label","magnet-thickness-label","magnet-clearance-label","magnet-note"].forEach(id=>{
@@ -433,10 +468,13 @@
     canvas.width=Math.round(rect.width*dpr); canvas.height=Math.round(rect.height*dpr);
     const ctx=canvas.getContext("2d",{willReadFrequently:true}), width=rect.width,height=rect.height;
     const mode=$("view-mode").value;
-    const parked=state.slidePark==="bottom";
-    const tray=mode==="lid"?[]:trayMesh(state), lid=mode==="tray"?[]:(parked?mirrorZ(lidMesh(state),slideGeometry(state).top):lidMesh(state));
+    const parked=state.slidePark==="bottom",both=state.slidePark==="both";
+    const tray=mode==="lid"?[]:trayMesh(state);
+    const lidTop=mode==="tray"||parked?[]:lidMesh(state);
+    const lidPark=mode==="tray"||!(parked||both)?[]:(state.slideInset?lidMesh(state).map(tri=>tri.map(p=>[p[0],p[1],p[2]-slideGeometry(state).top])):mirrorZ(lidMesh(state),slideGeometry(state).top));
     let raw=[...tray.map(tri=>({tri,color:[57,132,180],lid:false})),
-      ...lid.map(tri=>({tri,color:[235,161,67],lid:true})),
+      ...lidTop.map(tri=>({tri,color:[235,161,67],lid:true})),
+      ...lidPark.map(tri=>({tri,color:[235,161,67],lid:true,park:true})),
       ...magnetFaces(mode).filter(face=>!(parked&&face.lid))];
     const axisName=$("section-axis").value,sectionOn=axisName!=="off";
     if(sectionOn&&raw.length) {
@@ -451,8 +489,8 @@
     const displacement=face=>{
       const insertion=face.insert?face.insert*(1-magnet.progress)*14:0;
       if(!face.lid) return [0,0,insertion];
-      const separated=(mode==="exploded"?Math.max(14,state.H*.45):0)*(state.slidePark==="bottom"?-1:1);
-      if(state.style==="slide") return [-(state.L+2*state.t+12)*(1-animation.progress),0,separated+insertion];
+      const separated=(mode==="exploded"?Math.max(14,state.H*.45):0)*(face.park||state.slidePark==="bottom"?-1:1);
+      if(state.style==="slide") return [face.park&&both?0:-(state.L+2*state.t+12)*(1-animation.progress),0,separated+insertion];
       return [0,0,separated+insertion+Math.max(14,state.H*.45)*(1-animation.progress)];
     };
     const all=raw.flatMap(face=>{
@@ -581,12 +619,12 @@
   }
   function topSurface(out,points,z,s) {
     const mags=pocketsFor(s,"lidTop"),rects=labelRects(s);
-    if(mags.length) surfaceWithPockets(out,points,z,[0,0,1],mags,s.magnetThickness+.15);
+    if(mags.length) surfaceWithPockets(out,points,z,[0,0,1],mags,s.magnetThickness+.15,null,s.lt-(s.magnetThickness+.15)-.8-(pocketsFor(s,"lidBottom").length?s.magnetThickness+.15:0));
     else if(rects.length) surfaceWithPockets(out,points,z,[0,0,1],rects,.6);
     else fan(out,points,z,[0,0,1]);
   }
   function extrudeProfile(out,points,z0,z1,bottomPockets=[],pocketDepth=0,s=null) {
-    if(bottomPockets.length) surfaceWithPockets(out,points,z0,[0,0,-1],bottomPockets,pocketDepth);
+    if(bottomPockets.length) surfaceWithPockets(out,points,z0,[0,0,-1],bottomPockets,pocketDepth,null,s?s.lt-pocketDepth-.8-(s.magnetFaces.lidTop?pocketDepth:0):0);
     else fan(out,points,z0,[0,0,-1]);
     if(s) topSurface(out,points,z1,s);
     else fan(out,points,z1,[0,0,1]);
@@ -691,23 +729,35 @@
     }
     return result;
   }
-  function surfaceWithPockets(out,points,z,normal,pockets,depth=0,cavity=null) {
+  function surfaceWithPockets(out,points,z,normal,pockets,depth=0,cavity=null,roomForRoof=0,skipFace=false) {
     const inside=pointInPolygon;
     const holes=pockets.filter(hole=>hole.every(point=>inside(point,points)&&!(cavity&&inside(point,cavity))));
-    for(const [a,b,c] of (cavity?triangulatePolygonWithHoles(points,[cavity,...holes]):holes.length?triangulatePolygonWithHoles(points,holes):triangulatePolygon(points)))
+    if(!skipFace) for(const [a,b,c] of (cavity?triangulatePolygonWithHoles(points,[cavity,...holes]):holes.length?triangulatePolygonWithHoles(points,holes):triangulatePolygon(points)))
       triangle(out,[a[0],a[1],z],[b[0],b[1],z],[c[0],c[1],z],normal);
     if(!depth) return;
-    const floorZ=z+(normal[2]>0?-depth:depth);
+    const dir=normal[2]>0?-1:1,floorZ=z+dir*depth;
     for(const hole of holes) {
       for(let i=0;i<hole.length;i++) {
         const a=hole[i],b=hole[(i+1)%hole.length],dx=b[0]-a[0],dy=b[1]-a[1];
         quad(out,[a[0],a[1],z],[b[0],b[1],z],[b[0],b[1],floorZ],[a[0],a[1],floorZ],[dy,-dx,0]);
       }
-      fan(out,hole,floorZ,normal);
+      // A 45° pyramid roof over the pocket so the pocket prints without bridging; skipped when there isn't room.
+      const xs=hole.map(p=>p[0]),ys=hole.map(p=>p[1]),hw=(Math.max(...xs)-Math.min(...xs))/2,hh=(Math.max(...ys)-Math.min(...ys))/2;
+      const e=Math.min(roomForRoof,Math.min(hw,hh)-.4);
+      if(hole.length===4&&e>=.3) {
+        const cx=(Math.max(...xs)+Math.min(...xs))/2,cy=(Math.max(...ys)+Math.min(...ys))/2,roofZ=floorZ+dir*e;
+        const small=hole.map(p=>[p[0]+Math.sign(cx-p[0])*e,p[1]+Math.sign(cy-p[1])*e]);
+        for(let i=0;i<4;i++) {
+          const j=(i+1)%4,a=hole[i],b=hole[j],dx=b[0]-a[0],dy=b[1]-a[1],len=Math.hypot(dx,dy)||1;
+          quad(out,[a[0],a[1],floorZ],[b[0],b[1],floorZ],[small[j][0],small[j][1],roofZ],[small[i][0],small[i][1],roofZ],[dy/len*.707,-dx/len*.707,-dir*.707]);
+        }
+        fan(out,small,roofZ,normal);
+      } else fan(out,hole,floorZ,normal);
     }
   }
   // Pocket centres are shared by every face so stacked parts line up. Corner pockets are pushed
   // along the diagonal until the whole square clears the rounded or chamfered outline by 0.5 mm.
+  const HIDDEN_SKIN=.4;
   function magnetLayout(s) {
     const {L,W,t,magnetDiameter,magnetClearance,cornerStyle,cornerSize}=s,x1=L+2*t,y1=W+2*t,h=(magnetDiameter+magnetClearance)/2;
     if(s.magnetPos==="corners") {
@@ -828,10 +878,17 @@
   // Dovetail slide: a groove in the side walls (shelf, back wall, 45 degree roof, lip) that opens
   // through a lowered end wall, plus a matching tongue under the lid plate.
   function slideGeometry(s) {
-    const {H,b,t,c,cornerStyle,cornerSize}=s;
-    const top=H+b,d=Math.min(3,t-1.2),delta=d/3,slopeH=d-delta;
-    const R=cornerStyle==="square"?0:cornerSize,gs=top-(.5+slopeH+1);
+    const {H,b,t,c,lt,cornerStyle,cornerSize}=s;
+    const top=H+b,R=cornerStyle==="square"?0:cornerSize;
     const arcEnd=off=>R>0?t+cr(R,-(t-off),cornerStyle):t;
+    if(s.slideInset) {
+      // Inset lid: the lid sits in a 45° groove below the wall tops; walls rise 1.2 mm over the groove as a roof/guide lip.
+      const d=Math.min(3,t-1.2,lt+c-.1),sl=d-c-.3,h0=lt-sl,gapV=c+.1,roof=1.2;
+      const gs=top-roof-(c+h0+gapV+d),z1=gs+c+h0+gapV;
+      return {top,d,delta:0,gs,z1,z2:z1+d,R,innerR:R>0?cr(R,-t,cornerStyle):0,inset:true,sl,h0,zl:gs+c,
+        xc:Math.max(R,arcEnd(0),arcEnd(d),t)+2.6+(s.rimLen||0),gap:Math.max(.05,Math.min(.3,c/2))};
+    }
+    const d=Math.min(3,t-1.2),delta=d/3,slopeH=d-delta,gs=top-(.5+slopeH+1);
     return {top,d,delta,gs,z1:gs+.5,z2:gs+.5+slopeH,R,innerR:R>0?cr(R,-t,cornerStyle):0,
       xc:Math.max(R,arcEnd(0),arcEnd(d),arcEnd(delta),t)+.5,gap:Math.max(.05,Math.min(.3,c/2))};
   }
@@ -846,6 +903,40 @@
     for(let i=(lo+1)%n;;i=(i+1)%n) {chain.push(p[i]);if(i===hi) break;}
     chain.push(cut(p[hi],p[(hi+1)%n]));
     return chain;
+  }
+  function lowChain(p,xe) {
+    const n=p.length;let enter=-1,leave=-1;
+    for(let i=0;i<n;i++) {
+      const a=p[i],b=p[(i+1)%n];
+      if(a[0]>=xe&&b[0]<xe) enter=i; else if(a[0]<xe&&b[0]>=xe) leave=i;
+    }
+    const cut=(a,b)=>[xe,a[1]+(b[1]-a[1])*(xe-a[0])/(b[0]-a[0])];
+    const chain=[cut(p[enter],p[(enter+1)%n])];
+    for(let i=(enter+1)%n;;i=(i+1)%n) {chain.push(p[i]);if(i===leave) break;}
+    chain.push(cut(p[leave],p[(leave+1)%n]));
+    return chain;
+  }
+  // Guide rim for the inset slide lid: a wall that wraps the lid's front and both sides (open at the back), standing on the print bed
+  // beside the tray outline, so nothing overhangs. A thin floor strip ties it to the lid's entrance cap.
+  function prism(out,poly,z0,z1) {
+    const area=poly.reduce((sum,p,i)=>{const q=poly[(i+1)%poly.length];return sum+p[0]*q[1]-q[0]*p[1];},0),sg=area>=0?1:-1;
+    for(const [a,b,c] of triangulatePolygon(poly)) {
+      triangle(out,[a[0],a[1],z0],[b[0],b[1],z0],[c[0],c[1],z0],[0,0,-1]);
+      triangle(out,[a[0],a[1],z1],[b[0],b[1],z1],[c[0],c[1],z1],[0,0,1]);
+    }
+    for(let i=0;i<poly.length;i++) {
+      const a=poly[i],b=poly[(i+1)%poly.length];
+      quad(out,[a[0],a[1],z0],[b[0],b[1],z0],[b[0],b[1],z1],[a[0],a[1],z1],[sg*(b[1]-a[1]),-sg*(b[0]-a[0]),0]);
+    }
+  }
+  function addInsetRim(out,s) {
+    const {L,W,t,cornerStyle}=s,g=slideGeometry(s),x1=L+2*t,y1=W+2*t;
+    const ic=Math.min(.8,s.c+.25),outer=2,floor=1,xe=x1-g.R;
+    const rr=o=>g.R>0?cr(g.R,o,cornerStyle):0;
+    const chain=o=>lowChain(profile(-o,-o,x1+o,y1+o,rr(o),cornerStyle),xe);
+    const band=(o1,o2)=>[...chain(o1),...chain(o2).reverse()];
+    prism(out,band(outer,ic),g.zl,g.top+1.4);
+    prism(out,band(ic+.01,-.4),g.zl,g.zl+floor);
   }
   function addSlideUpper(out,s) {
     const {L,W,t,cornerStyle}=s,g=slideGeometry(s),x1=L+2*t,y1=W+2*t;
@@ -922,7 +1013,11 @@
       outer=o.points;trayRelief=o.edges;inner=complianceProfile(inner,cornerStyle,{corners:true}).points;
     }
     const usableDividerHeight=style==="slide"?Math.min(dividerHeight,Math.max(0,slideGeometry(s).gs-b-.3)):dividerHeight;
-    if(botPockets.length) surfaceWithPockets(m,outer,0,[0,0,-1],botPockets,magnetDepth);
+    if(botPockets.length&&s.magHidden) {
+      fan(m,outer,0,[0,0,-1]);
+      surfaceWithPockets(m,outer,HIDDEN_SKIN,[0,0,-1],botPockets,magnetDepth,null,top-HIDDEN_SKIN-magnetDepth-1,true);
+      for(const hole of botPockets) fan(m,hole,HIDDEN_SKIN,[0,0,1]);
+    } else if(botPockets.length) surfaceWithPockets(m,outer,0,[0,0,-1],botPockets,magnetDepth,null,top-magnetDepth-1-(pockets.length?magnetDepth:0));
     else fan(m,outer,z0,[0,0,-1]);
     fan(m,inner,b,[0,0,1]);
     const ridgeWidth=.35,ridgeLow=top-1.6,ridgeHigh=top-1.15;
@@ -994,6 +1089,30 @@
     }
     if(style==="slide") {
       const g=slideGeometry(s),zp0=g.top+g.gap,zt=zp0+lt,zb=g.gs+Math.min(c,.4),xb=L+t-c;
+      if(g.inset) {
+        const v0=g.d-c,v1=.3,zl=g.zl,rQ=v=>g.R>0?cr(g.R,-(t-v),cornerStyle):0;
+        const xe=g.xc-Math.min(c,.45),xs=xe-1.2;
+        const Q=v=>profile(xs,t-v,xb,W+t+v,rQ(v),cornerStyle),Q0=Q(v0),Q1=Q(v1);
+        const at=(P,z)=>P.map(p=>[p,z]),O=profile(0,0,x1,y1,g.R,cornerStyle);
+        const edge=P=>i=>{const a=P[i],q=P[(i+1)%P.length];return [q[1]-a[1],a[0]-q[0],0];};
+        const slope=i=>{const [nx,ny]=edge(Q0)(i),len=Math.hypot(nx,ny)||1;return [nx/len*.707,ny/len*.707,.707];};
+        fan(m,Q0,zl,[0,0,-1]);
+        connect(m,at(Q0,zl),at(Q0,zl+g.h0),edge(Q0));
+        connect(m,at(Q0,zl+g.h0),at(Q1,zl+lt),slope);
+        topSurface(m,Q1,zl+lt,s);
+        const cap=[];
+        for(let i=0;i<O.length;i++) {
+          const a=O[i],q=O[(i+1)%O.length];
+          if(a[0]<xe) cap.push(a);
+          if((a[0]<xe)!==(q[0]<xe)) cap.push([xe,a[1]+(q[1]-a[1])*(xe-a[0])/(q[0]-a[0])]);
+        }
+        // The entrance cap closes the lowered end flush with the wall tops; it overlaps the body so slicers union them.
+        if(cap.length>=3) extrudeProfile(m,cap,zl,g.top);
+        if(s.stackRim) {
+          addInsetRim(m,s);
+        }
+        return m;
+      }
       const rT=off=>g.R>0?cr(g.R,-off,cornerStyle):0,O=profile(0,0,x1,y1,g.R,cornerStyle);
       const T0=profile(g.xc,t-g.d+c,xb,W+t+g.d-c,rT(t-g.d+c),cornerStyle);
       const T2=profile(g.xc,t-g.delta+c,xb,W+t+g.delta-c,rT(t-g.delta+c),cornerStyle);
@@ -1101,7 +1220,7 @@
     } else connectSkirt(m,insideBottom,insideTop,innerNormal,reliefEdges,reliefTop,splitEdges,reliefTop);
     ring(m,outer,inside,bottomZ,[0,0,-1],reliefEdges);
     if(reliefEdges.size) addCornerReliefSlots(m,outer,inside,bottomZ,reliefTop,reliefEdges,reliefTop,[0,0,-1]);
-    if(pockets.length) surfaceWithPockets(m,inside,ceiling,[0,0,-1],pockets,magnetDepth);
+    if(pockets.length) surfaceWithPockets(m,inside,ceiling,[0,0,-1],pockets,magnetDepth,null,lt-magnetDepth-.8-(s.magnetFaces.lidTop?magnetDepth:0));
     else fan(m,inside,ceiling,[0,0,-1]);
     if(s.stackRim) addStackGuideRim(m,s,top);
     return m;
@@ -1127,7 +1246,7 @@
     const zt=state.style==="slide"?slideGeometry(state).top+slideGeometry(state).gap+state.lt:rim+state.lt;
     if(mode!=="lid") {
       if(mf.trayTop) add(top-depth,[190,196,208],false,1);
-      if(mf.trayBottom) add(depth-th,[190,196,208],false,-1);
+      if(mf.trayBottom) add(state.magHidden?HIDDEN_SKIN:depth-th,[190,196,208],false,state.magHidden?0:-1);
     }
     if(mode!=="tray") {
       if(mf.lidBottom) add(rim+depth-th,[205,62,62],true,-1);
@@ -1152,7 +1271,7 @@
   }
   function printOrient(tris,flip) {
     let out=tris;
-    if(flip) out=tris.map(tri=>tri.map(([x,y,z])=>[x,-y,-z]).reverse());
+    if(flip) out=tris.map(tri=>tri.map(([x,y,z])=>[x,-y,-z]));
     let minX=Infinity,minY=Infinity,minZ=Infinity;
     for(const tri of out) for(const p of tri) {minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);minZ=Math.min(minZ,p[2]);}
     return out.map(tri=>tri.map(([x,y,z])=>[x-minX,y-minY,z-minZ]));
